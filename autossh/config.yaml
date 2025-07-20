@@ -17,6 +17,8 @@ host_network: true
 map:
   - 'config:rw'
 
+watchdog: "tcp://127.0.0.1:8123"
+
 options:
   hostname: ''
   ssh_port: 22

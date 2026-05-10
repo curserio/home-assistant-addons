@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.3
+
+- Add `local_dynamic_forward` as a first-class option for SSH dynamic SOCKS tunnels.
+- Add `authorized_key_permitopen` to make restricted `authorized_keys` suggestions explicit.
+- Update container image metadata to point at this repository.
+
 ## 1.5.2
 
 - Keep generic upstream-style defaults while preserving fork documentation for Telegram SOCKS tunnel usage.

@@ -12,8 +12,8 @@ Autossh-based SSH tunnel add-on, derived from
 Current local changes:
 
 - Generic upstream-style defaults for fresh installs.
-- Documentation and suggested key restrictions for using an SSH dynamic SOCKS
-  tunnel as a Telegram API egress path.
+- First-class `local_dynamic_forward` support for SSH dynamic SOCKS tunnels.
+- Explicit `authorized_key_permitopen` support for restricted SSH keys.
 
 ## Install
 

@@ -135,7 +135,7 @@ Consider isolating the SSH connection inside a docker container. See above.
 **Solution, part 2:**
 Limit the capabilities of the add-on's ssh key on the remote server.
 This is done by adding [restrictions](https://manpages.debian.org/experimental/openssh-server/authorized_keys.5.en.html#restrict) right to the `authorized_keys` file.
-By default, this fork suggests adding a restricted key line with `permitlisten` for the Home Assistant reverse tunnel and `permitopen="api.telegram.org:443"` for the Telegram SOCKS tunnel. Copy the complete line printed in the add-on log.
+By default, this fork suggests adding a restricted key line with `permitlisten` for the Home Assistant reverse tunnel. If `authorized_key_permitopen` is configured, those destinations are included as `permitopen` entries too. Copy the complete line printed in the add-on log.
 Consider adding the complete suggested line to your remote server.
 
 The `-N` flag is always applied automatically by the add-on to stay within these restrictions.
@@ -163,8 +163,44 @@ Please add `TCPKeepAlive yes`, `ClientAliveInterval 30`, and `ClientAliveCountMa
 | `remote_port`             | Port on the remote server to bind the Home Assistant UI on.                                                                | `8123`                                    |
 | <br>**Secondary and Optional:** | |
 | `force_keygen`            | Force regeneration of SSH key pair on next start.                                                                          | `true` or `false` (default)               |
+| `local_dynamic_forward`   | Optional local SOCKS listener passed as SSH `-D`. Useful when Home Assistant must egress through the remote SSH server.     | empty (default), `172.30.32.1:1080`       |
+| `authorized_key_permitopen` | Optional destinations added to the suggested restricted `authorized_keys` line as `permitopen`.                           | `- api.telegram.org:443`                  |
 | `other_ssh_options`       | Additional SSH options passed to autossh. Use `-v` for verbose logging during troubleshooting, leave empty otherwise.      | empty (default), `-v`                     |
 | `skip_remote_host_checks` | Disable host checks (useful if SSH server rate-limits connections).                                                        | `true` or `false` (default)               |
 | `local_ip_address`        | Local IP to reach the Home Assistant UI. Not needed on standard HA OS setups.                                              | `home-assistant` (default), `172.30.32.1` |
 | `local_port`              | Local port to reach the Home Assistant UI. Not needed on standard HA OS setups.                                            | `8123` (default)                          |
 | `remote_forwarding`       | Custom SSH remote forwardings, in addition to the Home Assistant UI. If not needed, leave empty with `[]`                  | `[]` (default)<br>`- 127.0.0.1:1883:core-mosquitto:1883` |
+
+## Telegram API Egress Example
+
+If Telegram API is blocked from the Home Assistant network but available from
+the SSH server, expose a local SOCKS listener through the SSH connection:
+
+```yaml
+hostname: curser.dev
+ssh_port: 22
+username: tunnel
+remote_ip_address: "0.0.0.0"
+remote_port: 12004
+local_ip_address: "172.30.32.1"
+local_port: 8123
+remote_forwarding: []
+local_dynamic_forward: "172.30.32.1:1080"
+authorized_key_permitopen:
+  - api.telegram.org:443
+other_ssh_options: "-v"
+force_keygen: false
+skip_remote_host_checks: false
+```
+
+Set the Home Assistant Telegram Bot proxy URL to:
+
+```text
+socks5://172.30.32.1:1080
+```
+
+The add-on command should include both the reverse tunnel and dynamic forward:
+
+```text
+-R 0.0.0.0:12004:172.30.32.1:8123 -D 172.30.32.1:1080
+```

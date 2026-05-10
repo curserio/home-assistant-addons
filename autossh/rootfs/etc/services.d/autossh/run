@@ -21,8 +21,18 @@ if bashio::config.has_value 'remote_forwarding'; then
   done <<< "$(bashio::config 'remote_forwarding')"
 fi
 
+LOCAL_DYNAMIC_FORWARD=$(bashio::config 'local_dynamic_forward')
+if bashio::config.has_value 'local_dynamic_forward'; then
+  FORWARDING_STRING="${FORWARDING_STRING} -D ${LOCAL_DYNAMIC_FORWARD}"
+fi
+
 OTHER_SSH_OPTIONS=$(bashio::config 'other_ssh_options')
-AUTHORIZED_KEYS_RESTRICTION="command=\"\",restrict,port-forwarding,permitlisten=\"${FORWARD_REMOTE_IP_ADDRESS}:${FORWARD_REMOTE_PORT}\",permitopen=\"api.telegram.org:443\""
+AUTHORIZED_KEYS_RESTRICTION="command=\"\",restrict,port-forwarding,permitlisten=\"${FORWARD_REMOTE_IP_ADDRESS}:${FORWARD_REMOTE_PORT}\""
+if bashio::config.has_value 'authorized_key_permitopen'; then
+  while read -r LINE; do
+    AUTHORIZED_KEYS_RESTRICTION="${AUTHORIZED_KEYS_RESTRICTION},permitopen=\"${LINE}\""
+  done <<< "$(bashio::config 'authorized_key_permitopen')"
+fi
 
 
 echo ""

@@ -1,0 +1,41 @@
+name: SSH Tunnel & Forwarding
+version: 1.5.2
+slug: autossh
+description: >-
+  Permanent HA forwarding and domain linking through an SSH tunnel
+url: 'https://github.com/curserio/home-assistant-addons'
+arch:
+  - armhf
+  - armv7
+  - aarch64
+  - amd64
+  - i386
+homeassistant: "2024.1.0"
+startup: application
+boot: auto
+init: false
+host_network: true
+
+options:
+  hostname: ''
+  ssh_port: 22
+  username: autossh
+  remote_ip_address: "127.0.0.1"
+  remote_port: 8123
+  remote_forwarding: []
+  other_ssh_options: '-v'
+  force_keygen: false
+  skip_remote_host_checks: false
+schema:
+  hostname: str
+  ssh_port: int
+  username: str
+  remote_ip_address: str
+  remote_port: int
+  local_ip_address: str?
+  local_port: int?
+  remote_forwarding:
+    - str
+  other_ssh_options: str
+  force_keygen: bool
+  skip_remote_host_checks: bool

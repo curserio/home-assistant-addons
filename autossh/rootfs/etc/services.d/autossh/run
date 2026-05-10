@@ -1,0 +1,148 @@
+#!/usr/bin/with-contenv bashio
+# shellcheck shell=bash
+set -euo pipefail
+
+KEY_PATH=/data/ssh_keys
+
+HOSTNAME=$(bashio::config 'hostname')
+SSH_PORT=$(bashio::config 'ssh_port')
+USERNAME=$(bashio::config 'username')
+
+FORWARD_REMOTE_IP_ADDRESS=$(bashio::config 'remote_ip_address')
+FORWARD_REMOTE_PORT=$(bashio::config 'remote_port')
+FORWARD_LOCAL_IP_ADDRESS=$(bashio::config 'local_ip_address' '172.30.32.1')
+FORWARD_LOCAL_PORT=$(bashio::config 'local_port' '8123')
+FORWARD_LOCAL_SOCKET="${FORWARD_LOCAL_IP_ADDRESS}:${FORWARD_LOCAL_PORT}"
+FORWARD_REMOTE_SOCKET="${FORWARD_REMOTE_IP_ADDRESS}:${FORWARD_REMOTE_PORT}"
+FORWARDING_STRING="-R ${FORWARD_REMOTE_SOCKET}:${FORWARD_LOCAL_SOCKET}"
+if bashio::config.has_value 'remote_forwarding'; then
+  while read -r LINE; do
+    FORWARDING_STRING="${FORWARDING_STRING} -R ${LINE}"
+  done <<< "$(bashio::config 'remote_forwarding')"
+fi
+
+OTHER_SSH_OPTIONS=$(bashio::config 'other_ssh_options')
+AUTHORIZED_KEYS_RESTRICTION="command=\"\",restrict,port-forwarding,permitlisten=\"${FORWARD_REMOTE_IP_ADDRESS}:${FORWARD_REMOTE_PORT}\",permitopen=\"api.telegram.org:443\""
+
+
+echo ""
+echo ""
+bashio::log.info "Starting initialization script"
+echo ""
+echo "The container is connected via the following IP addresses:"
+ip -o address show
+echo ""
+
+if bashio::config.true 'force_keygen'; then
+  bashio::log.info "Deleting existing key pair due to set 'force_keygen'"
+  bashio::log.warning "Do not forget to unset 'force_keygen' in your add-on configuration"
+  rm -rf "$KEY_PATH"
+fi
+
+if [ ! -d "$KEY_PATH" ]; then
+  bashio::log.info "No previous key pair found"
+  mkdir -p "$KEY_PATH"
+  ssh-keygen -t ed25519 -N "" -C "hassio-setup-via-autossh" -f "${KEY_PATH}/autossh_rsa_key"
+  bashio::log.info "The public key is:"
+  echo "${AUTHORIZED_KEYS_RESTRICTION} $(cat "${KEY_PATH}/autossh_rsa_key.pub")"
+  bashio::log.warning "Add this key to '~/.ssh/authorized_keys' on your remote server now!"
+  bashio::log.warning "Please restart add-on when done. Exiting..."
+  exit 1
+else
+  bashio::log.info "Authentication key pair restored"
+fi
+touch -f /etc/ssh/ssh_config.d/empty.conf  # Hide debug warning in logs
+
+echo ""
+bashio::log.info "The public key used by this add-on is:"
+echo "${AUTHORIZED_KEYS_RESTRICTION} $(cat "${KEY_PATH}/autossh_rsa_key.pub")"
+bashio::log.info "If not done so already, please add the key to '~/.ssh/authorized_keys' on your remote server"
+
+if ! bashio::config.has_value 'hostname'; then
+  echo ""
+  bashio::log.error "Please set 'hostname' in your config to the address of your remote server"
+  exit 1
+fi
+
+echo ""
+HTTP_STATUS_CODE=$(/usr/bin/curl --write-out %{http_code} --silent --output /dev/null http://${FORWARD_LOCAL_SOCKET}) || true
+HTTPS_STATUS_CODE=$(/usr/bin/curl --write-out %{http_code} --silent --insecure --output /dev/null https://${FORWARD_LOCAL_SOCKET}) || true
+if [[ "${HTTP_STATUS_CODE}" -ne 200 && "${HTTPS_STATUS_CODE}" -ne 200 ]] ; then
+  bashio::log.error "Testing Home Assistant socket '${FORWARD_LOCAL_SOCKET}' on the local system..."\
+    "Failed with HTTP status code ${HTTP_STATUS_CODE} and HTTPS status code ${HTTPS_STATUS_CODE}."\
+    "Please check your config and consult the addon documentation."
+  exit 1
+elif [[ "${HTTP_STATUS_CODE}" -eq 200 ]]; then
+  bashio::log.info "Testing Home Assistant socket '${FORWARD_LOCAL_SOCKET}' on the local system... Web frontend found via HTTP"
+elif [[ "${HTTPS_STATUS_CODE}" -eq 200 ]]; then
+  bashio::log.info "Testing Home Assistant socket '${FORWARD_LOCAL_SOCKET}' on the local system... Web frontend found via HTTPS"
+fi
+
+echo ""
+HTTP_STATUS_CODE=$(/usr/bin/curl --write-out %{http_code} --silent --output /dev/null --header "X-Forwarded-For: 192.168.12.34" http://${FORWARD_LOCAL_SOCKET}) || true
+HTTPS_STATUS_CODE=$(/usr/bin/curl --write-out %{http_code} --silent --insecure --output /dev/null --header "X-Forwarded-For: 192.168.12.34" https://${FORWARD_LOCAL_SOCKET}) || true
+if [[ "${HTTP_STATUS_CODE}" -ne 200 && "${HTTPS_STATUS_CODE}" -ne 200 ]] ; then
+  bashio::log.error "Testing Home Assistant trusted_proxy setup on socket '${FORWARD_LOCAL_SOCKET}' with X-Forwarded-For header... Failed."\
+    "Please consult the addon documentation regarding the trusted_proxy setup."
+  # exit 1 # TODO activate after further testing
+elif [[ "${HTTP_STATUS_CODE}" -eq 200 || "${HTTPS_STATUS_CODE}" -eq 200 ]]; then
+  bashio::log.info "Testing Home Assistant trusted_proxy setup... Connection with X-Forwarded-For header accepted"
+fi
+
+TEST_COMMAND="/usr/bin/ssh "\
+"-o BatchMode=yes "\
+"-o ConnectTimeout=5 "\
+"-o PubkeyAuthentication=no "\
+"-o PasswordAuthentication=no "\
+"-o KbdInteractiveAuthentication=no "\
+"-o ChallengeResponseAuthentication=no "\
+"-o StrictHostKeyChecking=no "\
+"-p ${SSH_PORT} "\
+"${USERNAME}@${HOSTNAME} "\
+"2>&1 || true"
+
+if ! bashio::config.true 'skip_remote_host_checks'; then
+  echo ""
+  if eval "${TEST_COMMAND}" | grep -q "Permission denied"; then
+    bashio::log.info "Testing SSH service on '${HOSTNAME}:${SSH_PORT}'... SSH service found on remote server"
+  else
+    eval "${TEST_COMMAND}"
+    bashio::log.error "Testing SSH service on '${HOSTNAME}:${SSH_PORT}'... Failed to reach the SSH service on the remote server. "\
+      "Please check your config and consult the addon documentation."
+    exit 1
+  fi
+
+  echo ""
+  bashio::log.info "Remote server host keys:"
+  ssh-keyscan -p $SSH_PORT $HOSTNAME || true
+else
+  echo ""
+  bashio::log.info "Skipped Remote host checks"
+fi
+
+COMMAND="/usr/bin/autossh "\
+"-M 0 "\
+"-o ServerAliveInterval=30 "\
+"-o ServerAliveCountMax=3 "\
+"-o StrictHostKeyChecking=no "\
+"-o ExitOnForwardFailure=yes "\
+"-o UserKnownHostsFile=/root/.ssh/known_hosts "\
+"-o GlobalKnownHostsFile=/dev/null "\
+"-p ${SSH_PORT} "\
+"-i ${KEY_PATH}/autossh_rsa_key "\
+"${USERNAME}@${HOSTNAME} "\
+"-N"
+
+COMMAND="${COMMAND} ${FORWARDING_STRING} ${OTHER_SSH_OPTIONS}"
+
+echo ""
+bashio::log.info "Preparations done."
+echo ""
+
+export AUTOSSH_GATETIME=0
+export AUTOSSH_POLL=30
+export AUTOSSH_MAXSTART=1
+
+bashio::log.info "Executing command: ${COMMAND}"
+/usr/bin/autossh -V
+eval "${COMMAND}"
